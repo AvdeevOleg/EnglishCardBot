@@ -5,7 +5,7 @@ import psycopg2
 
 def connect_to_db():
     conn = psycopg2.connect(
-        database="english_card_bot_new",
+        database="english_card_bot",
         user="new_user",
         password="11111",
         host="localhost",

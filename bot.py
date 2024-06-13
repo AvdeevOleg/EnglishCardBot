@@ -3,33 +3,16 @@ import psycopg2
 from telebot import types, TeleBot, custom_filters
 from telebot.storage import StateMemoryStorage
 from telebot.handler_backends import State, StatesGroup
+from config import DB_CONFIG, TOKEN
 
-print('Start telegram bot...')
+print('Запуск Telegram бота...')
 
 state_storage = StateMemoryStorage()
-token_bot = 'Ваш токен Telegram_bot'
-bot = TeleBot(token_bot, state_storage=state_storage)
-
-known_users = []
-userStep = {}
-buttons = []
+bot = TeleBot(TOKEN, state_storage=state_storage)
 
 # Подключение к базе данных
-conn = psycopg2.connect(
-    dbname='english_card_bot_new',
-    user='new_user',
-    password='11111',
-    host='localhost'
-)
+conn = psycopg2.connect(**DB_CONFIG)
 cur = conn.cursor()
-
-
-def show_hint(*lines):
-    return '\n'.join(lines)
-
-
-def show_target(data):
-    return f"{data['target_word']} -> {data['translate_word']}"
 
 
 class Command:
@@ -45,13 +28,13 @@ class MyStates(StatesGroup):
 
 
 def get_user_step(uid):
-    if uid in userStep:
-        return userStep[uid]
+    cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (uid,))
+    user = cur.fetchone()
+    if user:
+        return user[0]
     else:
-        known_users.append(uid)
-        userStep[uid] = 0
-        print("New user detected, who hasn't used \"/start\" yet")
-        return 0
+        bot.send_message(uid, "Пожалуйста, используйте команду /start для начала.")
+        return None
 
 
 def generate_markup():
@@ -64,20 +47,19 @@ def create_new_buttons():
     global buttons
     buttons = []
 
-    # Получить слово из базы данных
-    cur.execute("SELECT target_word, translate_word FROM words WHERE user_id IS NULL ORDER BY RANDOM() LIMIT 1;")
+    # Получить случайное слово из базы данных
+    cur.execute("SELECT rus, eng FROM words ORDER BY RANDOM() LIMIT 1;")
     word = cur.fetchone()
     if word:
-        target_word, translate = word
+        rus, eng = word
     else:
-        target_word, translate = 'Peace', 'Мир'
+        rus, eng = 'Мир', 'Peace'
 
-    target_word_btn = types.KeyboardButton(target_word)
+    target_word_btn = types.KeyboardButton(eng)
     buttons.append(target_word_btn)
 
     # Получить другие слова из базы данных
-    cur.execute("SELECT target_word FROM words WHERE user_id IS NULL AND target_word != %s ORDER BY RANDOM() LIMIT 3;",
-                (target_word,))
+    cur.execute("SELECT eng FROM words WHERE eng != %s ORDER BY RANDOM() LIMIT 3;", (eng,))
     others = cur.fetchall()
     others = [row[0] for row in others]
     if len(others) < 3:
@@ -92,18 +74,27 @@ def create_new_buttons():
     delete_word_btn = types.KeyboardButton(Command.DELETE_WORD)
     buttons.extend([next_btn, add_word_btn, delete_word_btn])
 
-    return target_word, translate, others
+    return rus, eng, others
 
 
-@bot.message_handler(commands=['cards', 'start'])
+@bot.message_handler(commands=['start'])
+def start(message):
+    uid = message.chat.id
+    cur.execute("SELECT telegram_id FROM users WHERE telegram_id = %s;", (uid,))
+    user = cur.fetchone()
+    if not user:
+        cur.execute(
+            "INSERT INTO users (telegram_id, username, first_name, last_name) VALUES (%s, %s, %s, %s)",
+            (uid, message.chat.username, message.chat.first_name, message.chat.last_name)
+        )
+        conn.commit()
+    bot.send_message(uid,
+                     "Привет! 👋 Давай попрактикуемся в английском языке. Тренировки можешь проходить в удобном для себя темпе.")
+    create_cards(message)
+
+
+@bot.message_handler(commands=['cards'])
 def create_cards(message):
-    cid = message.chat.id
-    if cid not in known_users:
-        known_users.append(cid)
-        userStep[cid] = 0
-        bot.send_message(cid,
-                         "Привет 👋 Давай попрактикуемся в английском языке. Тренировки можешь проходить в удобном для себя темпе.")
-
     target_word, translate, others = create_new_buttons()
     markup = generate_markup()
 
@@ -133,7 +124,7 @@ def next_cards(message):
 def delete_word(message):
     with bot.retrieve_data(message.from_user.id, message.chat.id) as data:
         target_word = data['target_word']
-        cur.execute("DELETE FROM words WHERE target_word = %s AND user_id = %s;", (target_word, message.from_user.id))
+        cur.execute("DELETE FROM words WHERE eng = %s;", (target_word,))
         conn.commit()
         bot.send_message(message.chat.id, f"Слово '{target_word}' успешно удалено!")
 
@@ -141,44 +132,40 @@ def delete_word(message):
 @bot.message_handler(func=lambda message: message.text == Command.ADD_WORD)
 def add_word(message):
     bot.set_state(message.from_user.id, MyStates.another_words, message.chat.id)
-    bot.send_message(message.chat.id, "Введите новое слово в формате: слово - перевод")
+    bot.send_message(message.chat.id,
+                     "Введите слово на русском и его перевод на английский через запятую (например, собака,dog):")
 
 
-@bot.message_handler(state=MyStates.another_words, content_types=['text'])
-def save_new_word(message):
+@bot.message_handler(state=MyStates.another_words)
+def process_add_word(message):
     try:
-        target_word, translate_word = message.text.split(' - ')
-        cur.execute("INSERT INTO words (target_word, translate_word, user_id) VALUES (%s, %s, %s);",
-                    (target_word, translate_word, message.from_user.id))
+        rus, eng = message.text.split(',')
+        rus = rus.strip()
+        eng = eng.strip()
+        cur.execute("INSERT INTO words (rus, eng) VALUES (%s, %s);", (rus, eng))
         conn.commit()
-        bot.send_message(message.chat.id, f"Слово '{target_word}' успешно добавлено!")
-    except ValueError:
-        bot.send_message(message.chat.id, "Пожалуйста, используйте формат: слово - перевод")
-    bot.delete_state(message.from_user.id, message.chat.id)
+        bot.send_message(message.chat.id, f"Слово '{rus} - {eng}' успешно добавлено!")
+        bot.delete_state(message.from_user.id, message.chat.id)
+    except Exception as e:
+        bot.send_message(message.chat.id, "Произошла ошибка при добавлении слова. Пожалуйста, попробуйте снова.")
+        print(e)
 
 
-@bot.message_handler(func=lambda message: True, content_types=['text'])
-def message_reply(message):
-    text = message.text
-    markup = types.ReplyKeyboardMarkup(row_width=2)
+@bot.message_handler(state=MyStates.target_word)
+def check_translation(message):
     with bot.retrieve_data(message.from_user.id, message.chat.id) as data:
         target_word = data['target_word']
-        if text == target_word:
-            hint = show_target(data)
-            hint_text = ["Отлично!❤", hint]
-            hint = show_hint(*hint_text)
-        else:
-            for btn in buttons:
-                if btn.text == text:
-                    btn.text = text + '❌'
-                    break
-            hint = show_hint("Допущена ошибка!",
-                             f"Попробуй ещё раз вспомнить слово 🇷🇺 {data['translate_word']}")
-    markup.add(*buttons)
-    bot.send_message(message.chat.id, hint, reply_markup=markup)
+        translate_word = data['translate_word']
+        other_words = data['other_words']
+
+    if message.text == target_word:
+        bot.send_message(message.chat.id, "Правильно! 🎉")
+    else:
+        bot.send_message(message.chat.id, f"Неправильно. Правильный ответ: {target_word}")
 
 
+# Запуск бота
 bot.add_custom_filter(custom_filters.StateFilter(bot))
+bot.infinity_polling()
 
-bot.infinity_polling(skip_pending=True)
 
