@@ -14,18 +14,15 @@ bot = TeleBot(TOKEN, state_storage=state_storage)
 conn = psycopg2.connect(**DB_CONFIG)
 cur = conn.cursor()
 
-
 class Command:
     ADD_WORD = 'Добавить слово ➕'
     DELETE_WORD = 'Удалить слово🔙'
     NEXT = 'Дальше ⏭'
 
-
 class MyStates(StatesGroup):
     target_word = State()
     translate_word = State()
     another_words = State()
-
 
 def get_user_step(uid):
     cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (uid,))
@@ -36,12 +33,10 @@ def get_user_step(uid):
         bot.send_message(uid, "Пожалуйста, используйте команду /start для начала.")
         return None
 
-
 def generate_markup():
     markup = types.ReplyKeyboardMarkup(row_width=2)
     markup.add(*buttons)
     return markup
-
 
 def create_new_buttons():
     global buttons
@@ -76,7 +71,6 @@ def create_new_buttons():
 
     return rus, eng, others
 
-
 @bot.message_handler(commands=['start'])
 def start(message):
     uid = message.chat.id
@@ -92,13 +86,12 @@ def start(message):
                      "Привет! 👋 Давай попрактикуемся в английском языке. Тренировки можешь проходить в удобном для себя темпе.")
     create_cards(message)
 
-
 @bot.message_handler(commands=['cards'])
 def create_cards(message):
     target_word, translate, others = create_new_buttons()
     markup = generate_markup()
 
-    greeting = f"Выбери перевод слова:\n🇷🇺 {translate}"
+    greeting = f"Выбери перевод слова:\n🇷🇺 {target_word}"
     bot.send_message(message.chat.id, greeting, reply_markup=markup)
     bot.set_state(message.from_user.id, MyStates.target_word, message.chat.id)
     with bot.retrieve_data(message.from_user.id, message.chat.id) as data:
@@ -106,35 +99,28 @@ def create_cards(message):
         data['translate_word'] = translate
         data['other_words'] = others
 
-
 @bot.message_handler(func=lambda message: message.text == Command.NEXT)
 def next_cards(message):
-    target_word, translate, others = create_new_buttons()
-    markup = generate_markup()
-
-    greeting = f"Выбери перевод слова:\n🇷🇺 {translate}"
-    bot.send_message(message.chat.id, greeting, reply_markup=markup)
-    with bot.retrieve_data(message.from_user.id, message.chat.id) as data:
-        data['target_word'] = target_word
-        data['translate_word'] = translate
-        data['other_words'] = others
-
+    create_cards(message)
 
 @bot.message_handler(func=lambda message: message.text == Command.DELETE_WORD)
 def delete_word(message):
-    with bot.retrieve_data(message.from_user.id, message.chat.id) as data:
-        target_word = data['target_word']
-        cur.execute("DELETE FROM words WHERE eng = %s;", (target_word,))
-        conn.commit()
-        bot.send_message(message.chat.id, f"Слово '{target_word}' успешно удалено!")
+    bot.send_message(message.chat.id, "Введите слово на английском, которое хотите удалить:")
+    bot.set_state(message.from_user.id, MyStates.translate_word, message.chat.id)
 
+@bot.message_handler(state=MyStates.translate_word)
+def process_delete_word(message):
+    word_to_delete = message.text.strip()
+    cur.execute("DELETE FROM words WHERE eng = %s;", (word_to_delete,))
+    conn.commit()
+    bot.send_message(message.chat.id, f"Слово '{word_to_delete}' успешно удалено!")
+    bot.delete_state(message.from_user.id, message.chat.id)
 
 @bot.message_handler(func=lambda message: message.text == Command.ADD_WORD)
 def add_word(message):
     bot.set_state(message.from_user.id, MyStates.another_words, message.chat.id)
     bot.send_message(message.chat.id,
                      "Введите слово на русском и его перевод на английский через запятую (например, собака,dog):")
-
 
 @bot.message_handler(state=MyStates.another_words)
 def process_add_word(message):
@@ -150,7 +136,6 @@ def process_add_word(message):
         bot.send_message(message.chat.id, "Произошла ошибка при добавлении слова. Пожалуйста, попробуйте снова.")
         print(e)
 
-
 @bot.message_handler(state=MyStates.target_word)
 def check_translation(message):
     with bot.retrieve_data(message.from_user.id, message.chat.id) as data:
@@ -158,11 +143,10 @@ def check_translation(message):
         translate_word = data['translate_word']
         other_words = data['other_words']
 
-    if message.text == target_word:
+    if message.text == translate_word:
         bot.send_message(message.chat.id, "Правильно! 🎉")
     else:
-        bot.send_message(message.chat.id, f"Неправильно. Правильный ответ: {target_word}")
-
+        bot.send_message(message.chat.id, f"Неправильно. Правильный ответ: {translate_word}")
 
 # Запуск бота
 bot.add_custom_filter(custom_filters.StateFilter(bot))

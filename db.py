@@ -1,18 +1,9 @@
 import psycopg2
 from psycopg2 import sql
 from config import DB_CONFIG
-import psycopg2
 
 def connect_to_db():
-    conn = psycopg2.connect(
-        database="english_card_bot",
-        user="new_user",
-        password="11111",
-        host="localhost",
-        port="5432",
-        client_encoding="UTF8"
-    )
-    return conn
+    return psycopg2.connect(**DB_CONFIG)
 
 def get_connection():
     return psycopg2.connect(
@@ -23,13 +14,12 @@ def get_connection():
         port=DB_CONFIG['port']
     )
 
-
-def create_user(username, first_name, last_name):
+def create_user(username, first_name, last_name, telegram_id):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO users (username, first_name, last_name) VALUES (%s, %s, %s) RETURNING user_id",
-        (username, first_name, last_name)
+        "INSERT INTO users (username, first_name, last_name, telegram_id) VALUES (%s, %s, %s, %s) RETURNING id",
+        (username, first_name, last_name, telegram_id)
     )
     user_id = cur.fetchone()[0]
     conn.commit()
@@ -37,16 +27,14 @@ def create_user(username, first_name, last_name):
     conn.close()
     return user_id
 
-
 def get_random_word():
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT word, translation FROM words ORDER BY RANDOM() LIMIT 1")
+    cur.execute("SELECT id, rus, eng FROM words ORDER BY RANDOM() LIMIT 1")
     word = cur.fetchone()
     cur.close()
     conn.close()
     return word
-
 
 def add_user_word(user_id, word_id):
     conn = get_connection()
@@ -59,12 +47,11 @@ def add_user_word(user_id, word_id):
     cur.close()
     conn.close()
 
-
 def get_user_words(user_id):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute(
-        "SELECT words.word, words.translation FROM words JOIN user_words ON words.word_id = user_words.word_id WHERE user_words.user_id = %s",
+        "SELECT words.rus, words.eng FROM words JOIN user_words ON words.id = user_words.word_id WHERE user_words.user_id = %s",
         (user_id,)
     )
     words = cur.fetchall()

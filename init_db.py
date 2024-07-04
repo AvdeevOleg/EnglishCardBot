@@ -1,10 +1,9 @@
 import psycopg2
 from config import DB_CONFIG
 
-
 # Функция для создания таблиц
 def create_tables():
-    команды = (
+    commands = (
         """
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -17,9 +16,12 @@ def create_tables():
         """
         CREATE TABLE IF NOT EXISTS words (
             id SERIAL PRIMARY KEY,
-            target_word VARCHAR(255) NOT NULL,
-            translate_word VARCHAR(255) NOT NULL,
-            user_id BIGINT DEFAULT NULL
+            rus VARCHAR(255) NOT NULL,
+            eng VARCHAR(255) NOT NULL,
+            user_id BIGINT DEFAULT NULL,
+            CONSTRAINT fk_user
+              FOREIGN KEY(user_id)
+              REFERENCES users(id)
         )
         """
     )
@@ -29,8 +31,8 @@ def create_tables():
         # Подключение к базе данных
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
-        for команда in команды:
-            cur.execute(команда)
+        for command in commands:
+            cur.execute(command)
         conn.commit()
         cur.close()
     except (Exception, psycopg2.DatabaseError) as error:
@@ -39,29 +41,28 @@ def create_tables():
         if conn is not None:
             conn.close()
 
-
 # Функция для вставки начальных слов в базу данных
 def insert_initial_words():
-    слова = [
-        ('Red', 'Красный'),
-        ('Blue', 'Синий'),
-        ('Green', 'Зелёный'),
-        ('Yellow', 'Жёлтый'),
-        ('I', 'Я'),
-        ('You', 'Ты'),
-        ('He', 'Он'),
-        ('She', 'Она'),
-        ('We', 'Мы'),
-        ('They', 'Они')
+    words = [
+        ('Красный', 'Red'),
+        ('Синий', 'Blue'),
+        ('Зелёный', 'Green'),
+        ('Жёлтый', 'Yellow'),
+        ('Я', 'I'),
+        ('Ты', 'You'),
+        ('Он', 'He'),
+        ('Она', 'She'),
+        ('Мы', 'We'),
+        ('Они', 'They')
     ]
 
-    sql_insert = "INSERT INTO words (target_word, translate_word) VALUES (%s, %s)"
+    sql_insert = "INSERT INTO words (rus, eng) VALUES (%s, %s)"
     conn = None
     try:
         # Подключение к базе данных
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
-        cur.executemany(sql_insert, слова)
+        cur.executemany(sql_insert, words)
         conn.commit()
         cur.close()
     except (Exception, psycopg2.DatabaseError) as error:
@@ -69,7 +70,6 @@ def insert_initial_words():
     finally:
         if conn is not None:
             conn.close()
-
 
 # Основная функция для выполнения всех действий
 if __name__ == '__main__':

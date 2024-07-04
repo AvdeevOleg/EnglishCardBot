@@ -9,4 +9,4 @@ DB_CONFIG = {
 }
 
 # Токен Telegram-бота
-TOKEN = 'Ваш_Telegram_Bot_Token'
+TOKEN = 'Ваш токен Телеграмм-бота'
