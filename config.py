@@ -1,12 +1,10 @@
-# Конфигурация базы данных
+TOKEN = 'Ваш_Telegram_Bot_Token'
+
 DB_CONFIG = {
     'dbname': 'english_card_bot',
-    'user': 'new_user',
-    'password': '11111',
+    'user': 'ваш_пользователь',
+    'password': 'ваш_пароль',
     'host': 'localhost',
     'port': '5432',
     'client_encoding': 'UTF8'
 }
-
-# Токен Telegram-бота
-TOKEN = 'Ваш токен Телеграмм-бота'

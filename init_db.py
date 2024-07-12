@@ -23,6 +23,19 @@ def create_tables():
               FOREIGN KEY(user_id)
               REFERENCES users(id)
         )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS user_words (
+            user_id BIGINT NOT NULL,
+            word_id BIGINT NOT NULL,
+            PRIMARY KEY (user_id, word_id),
+            CONSTRAINT fk_user
+              FOREIGN KEY(user_id)
+              REFERENCES users(id),
+            CONSTRAINT fk_word
+              FOREIGN KEY(word_id)
+              REFERENCES words(id)
+        )
         """
     )
 

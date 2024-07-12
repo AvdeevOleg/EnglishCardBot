@@ -24,6 +24,15 @@ class MyStates(StatesGroup):
     translate_word = State()
     another_words = State()
 
+def user_exists(uid):
+    cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (uid,))
+    return cur.fetchone() is not None
+
+def get_user_id(uid):
+    cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (uid,))
+    user = cur.fetchone()
+    return user[0] if user else None
+
 def get_user_step(uid):
     cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (uid,))
     user = cur.fetchone()
@@ -38,12 +47,16 @@ def generate_markup():
     markup.add(*buttons)
     return markup
 
-def create_new_buttons():
+def create_new_buttons(uid):
     global buttons
     buttons = []
 
-    # Получить случайное слово из базы данных
-    cur.execute("SELECT rus, eng FROM words ORDER BY RANDOM() LIMIT 1;")
+    # Получить случайное слово из базы данных (общие или принадлежащие пользователю)
+    cur.execute("""
+        SELECT rus, eng FROM words
+        WHERE user_id IS NULL OR user_id = %s
+        ORDER BY RANDOM() LIMIT 1;
+    """, (uid,))
     word = cur.fetchone()
     if word:
         rus, eng = word
@@ -53,8 +66,12 @@ def create_new_buttons():
     target_word_btn = types.KeyboardButton(eng)
     buttons.append(target_word_btn)
 
-    # Получить другие слова из базы данных
-    cur.execute("SELECT eng FROM words WHERE eng != %s ORDER BY RANDOM() LIMIT 3;", (eng,))
+    # Получить другие слова из базы данных (общие или принадлежащие пользователю)
+    cur.execute("""
+        SELECT eng FROM words
+        WHERE (user_id IS NULL OR user_id = %s) AND eng != %s
+        ORDER BY RANDOM() LIMIT 3;
+    """, (uid, eng))
     others = cur.fetchall()
     others = [row[0] for row in others]
     if len(others) < 3:
@@ -74,7 +91,7 @@ def create_new_buttons():
 @bot.message_handler(commands=['start'])
 def start(message):
     uid = message.chat.id
-    cur.execute("SELECT telegram_id FROM users WHERE telegram_id = %s;", (uid,))
+    cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (uid,))
     user = cur.fetchone()
     if not user:
         cur.execute(
@@ -88,7 +105,8 @@ def start(message):
 
 @bot.message_handler(commands=['cards'])
 def create_cards(message):
-    target_word, translate, others = create_new_buttons()
+    uid = message.chat.id
+    target_word, translate, others = create_new_buttons(uid)
     markup = generate_markup()
 
     greeting = f"Выбери перевод слова:\n🇷🇺 {target_word}"
@@ -110,10 +128,15 @@ def delete_word(message):
 
 @bot.message_handler(state=MyStates.translate_word)
 def process_delete_word(message):
+    uid = message.chat.id
     word_to_delete = message.text.strip()
-    cur.execute("DELETE FROM words WHERE eng = %s;", (word_to_delete,))
+    user_id = get_user_id(uid)
+    cur.execute("DELETE FROM words WHERE eng = %s AND user_id = %s;", (word_to_delete, user_id))
     conn.commit()
-    bot.send_message(message.chat.id, f"Слово '{word_to_delete}' успешно удалено!")
+    if cur.rowcount > 0:
+        bot.send_message(message.chat.id, f"Слово '{word_to_delete}' успешно удалено!")
+    else:
+        bot.send_message(message.chat.id, "Вы можете удалить только свои слова.")
     bot.delete_state(message.from_user.id, message.chat.id)
 
 @bot.message_handler(func=lambda message: message.text == Command.ADD_WORD)
@@ -125,10 +148,19 @@ def add_word(message):
 @bot.message_handler(state=MyStates.another_words)
 def process_add_word(message):
     try:
+        uid = message.chat.id
         rus, eng = message.text.split(',')
         rus = rus.strip()
         eng = eng.strip()
-        cur.execute("INSERT INTO words (rus, eng) VALUES (%s, %s);", (rus, eng))
+
+        # Получаем id пользователя
+        user_id = get_user_id(uid)
+        if user_id is None:
+            bot.send_message(message.chat.id, "Пожалуйста, используйте команду /start для начала.")
+            return
+
+        # Теперь добавляем слово
+        cur.execute("INSERT INTO words (rus, eng, user_id) VALUES (%s, %s, %s);", (rus, eng, user_id))
         conn.commit()
         bot.send_message(message.chat.id, f"Слово '{rus} - {eng}' успешно добавлено!")
         bot.delete_state(message.from_user.id, message.chat.id)
@@ -151,5 +183,7 @@ def check_translation(message):
 # Запуск бота
 bot.add_custom_filter(custom_filters.StateFilter(bot))
 bot.infinity_polling()
+
+
 
 
